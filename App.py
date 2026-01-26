@@ -88,21 +88,7 @@ else:
         df = pd.read_csv(io.StringIO(csv_content))
         df['Date (GMT+1)'] = pd.to_datetime(df['Date (GMT+1)'])
         return df
-    
-    uploaded_file = st.file_uploader("Upload Germany 2025.csv", type="csv")
-    if uploaded_file is not None:
-        content = uploaded_file.read().decode("utf-8-sig")
-        lines = content.splitlines()
-        csv_content = '\n'.join([lines[0]] + lines[2:])
-        df = pd.read_csv(io.StringIO(csv_content))
-        df['Date (GMT+1)'] = pd.to_datetime(df['Date (GMT+1)'])
-    else:
-        try:
-            df = load_data("Germany 2025.csv")
-            st.info("Loaded Germany 2025.csv from current directory.")
-        except Exception as e:
-            st.warning("No file loaded. Please upload Germany 2025.csv.")
-            st.stop()
+    df = load_data()
     
     technologies = [
         "Cross border electricity trading","Hydro Run-of-River","Biomass","Fossil brown coal / lignite",
@@ -123,4 +109,5 @@ else:
     # Plot
     st.subheader(f"Monthly Total Production for {selected_tech} (in GWh)")
     st.bar_chart(monthly_sum)
+
 
