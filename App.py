@@ -169,35 +169,40 @@ else:
     df[selected_col] = pd.to_numeric(df[selected_col], errors="coerce")
 
    
+
     # 6) Compute monthly total energy in GWh: sum(MW) * 0.25 h / 1000 = sum(MW) / 4000
     monthly_gwh = df.groupby("Month", sort=True)[selected_col].sum() / 4000.0
-
+    
     # 7) Plot with matplotlib (plt)
     st.subheader(f"Monthly Total Energy of '{selected_col}' (GWh)")
-
-    # Prepare x-axis labels as YYYY-MM
-    x = monthly_gwh.index.to_timestamp()  # ensure TimestampIndex
-    x_labels = x.strftime("%Y-%m")
+    
+    # Robust handling of index types for labels
+    idx = monthly_gwh.index
+    try:
+        # If DatetimeIndex -> strftime works
+        x_labels = idx.strftime("%Y-%m")
+    except Exception:
+        # Fallback: stringify (works for PeriodIndex or plain Index)
+        x_labels = idx.astype(str)
+    
     y = monthly_gwh.values
-
-    # Create the figure
+    
     fig, ax = plt.subplots(figsize=(12, 5))
     ax.bar(x_labels, y, color="#2E86DE", edgecolor="#1B4F72")
-
+    
     ax.set_title(f"Monthly Total Energy – {selected_col}", fontsize=14, pad=12)
     ax.set_xlabel("Month (YYYY-MM)", fontsize=12)
     ax.set_ylabel("Energy (GWh)", fontsize=12)
-
-    # A few visual polish touches
+    
     ax.grid(axis="y", linestyle="--", alpha=0.4)
     plt.xticks(rotation=45, ha="right")
     plt.tight_layout()
-
+    
     st.pyplot(fig)
-
-    # Optional: show raw values
+    
     with st.expander("Show raw monthly totals (GWh)"):
         st.write(monthly_gwh.round(3))
+
 
 
 
