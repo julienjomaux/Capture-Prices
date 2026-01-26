@@ -131,63 +131,7 @@ else:
         existing_candidates = [c for c in name_candidates if c in df_all.columns]
         return df_all, existing_candidates
 
-    def try_parse_datetime(series: pd.Series) -> pd.Series:
-        """
-        Try multiple strategies to coerce a series to datetime.
-        Specifically supports ISO 8601 with timezone (e.g., 2025-01-01T00:00+01:00).
-        Returns a datetime series; raises if parsing fails badly.
-        """
-        s = series.copy()
-
-        # Already datetime?
-        if pd.api.types.is_datetime64_any_dtype(s):
-            return s
-
-        # Clean stray spaces/zero-width chars
-        s = s.astype(str).str.strip().str.replace("\u200b", "", regex=False)
-        # Empty strings -> NaT
-        s = s.replace({"": pd.NA})
-
-        # Strategy A: ISO8601 (with timezone like +01:00)
-        s_iso = pd.to_datetime(s, errors="coerce", utc=False, format=None)
-        if s_iso.notna().mean() > 0.8:
-            return s_iso
-
-        # Strategy B: explicit common formats (with and without timezone)
-        common_formats = [
-            "%Y-%m-%dT%H:%M%z",     # 2025-01-01T00:00+01:00
-            "%Y-%m-%d %H:%M%z",
-            "%Y-%m-%d %H:%M",
-            "%Y-%m-%d %H:%M:%S",
-            "%d/%m/%Y %H:%M",
-            "%d/%m/%Y %H:%M:%S",
-            "%m/%d/%Y %H:%M",
-            "%m/%d/%Y %H:%M:%S",
-            "%Y-%m-%d",
-            "%d/%m/%Y",
-            "%m/%d/%Y",
-            "%d-%m-%Y %H:%M",
-            "%Y.%m.%d %H:%M",
-        ]
-        for fmt in common_formats:
-            s_try = pd.to_datetime(s, format=fmt, errors="coerce", utc=False)
-            if s_try.notna().mean() > 0.8:
-                return s_try
-
-        # Strategy C: numeric timestamps (ms then s)
-        s_num = pd.to_numeric(s, errors="coerce")
-        if s_num.notna().mean() > 0.8:
-            s_ms = pd.to_datetime(s_num, errors="coerce", unit="ms", utc=False)
-            if s_ms.notna().mean() > 0.8:
-                return s_ms
-            s_s = pd.to_datetime(s_num, errors="coerce", unit="s", utc=False)
-            if s_s.notna().mean() > 0.8:
-                return s_s
-
-        raise ValueError(
-            "Failed to parse datetime for the selected column.\n"
-            f"Sample values: {series.dropna().astype(str).head(5).tolist()}\n"
-        )
+    
 
     # ---------------- Load & Parse ----------------
     try:
@@ -196,40 +140,6 @@ else:
         st.error(f"❌ Data loading error: {e}")
         st.stop()
 
-    st.markdown("### Choose the date/time column")
-    if not date_col_candidates:
-        st.error(
-            "I couldn't auto-detect a date column. "
-            "Please verify your CSV has a date/time column (e.g., 'Date (GMT+1)')."
-        )
-        st.write("Columns detected:", list(df.columns))
-        st.stop()
-
-    # Let the user override which column is the datetime
-    date_col = st.selectbox("Date/Time column", options=date_col_candidates, index=0)
-
-    # Try parsing with robust logic
-    try:
-        df[date_col] = try_parse_datetime(df[date_col])
-        # Drop timezone so .dt.to_period('M') works consistently on naive timestamps
-        if pd.api.types.is_datetime64tz_dtype(df[date_col]):
-            # Try to just remove tz info (keep local time as shown in the CSV)
-            try:
-                df[date_col] = df[date_col].dt.tz_localize(None)
-            except (TypeError, AttributeError):
-                # For some tz-aware types, convert to UTC then drop tz
-                df[date_col] = df[date_col].dt.tz_convert("UTC").dt.tz_localize(None)
-    except Exception as e:
-        st.error(f"❌ Date parse error for '{date_col}': {e}")
-        with st.expander("Show column samples and dtypes"):
-            st.write("Detected columns and dtypes:")
-            st.write(df.dtypes)
-            st.write("First 10 non-null samples from the selected column:")
-            st.write(df[date_col].dropna().head(10))
-        st.stop()
-
-    # Remove rows without a valid datetime
-    df = df[df[date_col].notna()].copy()
 
     # Create Month column (first day of the month timestamp)
     
@@ -237,76 +147,5 @@ else:
     df["Month"] = df[date_col].dt.to_period("M").dt.to_timestamp()
 
     # ---------------- Make numeric value columns numeric ----------------
-    # Convert all non-date, non-meta columns to numeric where possible
-    meta_cols = {date_col, "Month", "__SourceFile"}
-    value_cols = [c for c in df.columns if c not in meta_cols]
-    for c in value_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    # ---------------- Technology List ----------------
-    # Derive candidates from numeric columns and exclude obvious non-tech columns
-    exclude_keywords = [
-        "price", "avg", "mean", "marginal", "min", "max", "product",
-        "hour", "quarter", "period", "auction", "load"
-    ]
-    numeric_cols = set(df.select_dtypes(include="number").columns)
-    candidate_techs = []
-    for c in sorted(numeric_cols):
-        if c in meta_cols:
-            continue
-        # exclude via name keywords
-        low = str(c).lower()
-        if any(k in low for k in exclude_keywords):
-            continue
-        candidate_techs.append(c)
-
-    # Fallback list if nothing is detected
-    if not candidate_techs:
-        candidate_techs = [
-            "Cross border electricity trading","Hydro Run-of-River","Biomass","Fossil brown coal / lignite",
-            "Fossil hard coal","Fossil oil","Fossil coal-derived gas","Fossil gas","Geothermal",
-            "Hydro water reservoir","Hydro pumped storage","Others","Waste","Wind offshore",
-            "Wind onshore","Solar"
-        ]
-        missing = [c for c in candidate_techs if c not in df.columns]
-        if missing:
-            st.warning(
-                "Some expected technology columns were not found in the data: "
-                + ", ".join(missing)
-            )
-
-    st.subheader("Select the technology to visualize:")
-    selected_tech = st.selectbox("Technology", candidate_techs)
-
-    if selected_tech not in df.columns:
-        st.error(f"Selected technology '{selected_tech}' not found in the data columns.")
-        st.stop()
-
-    # ---------------- Monthly Aggregations ----------------
-    # Average monthly production (as average power in MW):
-    monthly_avg_mw = df.groupby("Month", sort=True)[selected_tech].mean()
-
-    # Total monthly energy in GWh (sum of 15-min MW -> MWh -> GWh):
-    # Each 15-min interval contributes MW * 0.25 hours = MWh; divide by 1000 for GWh.
-    # => sum(MW) * (0.25 / 1000) = sum(MW) / 4000
-    monthly_gwh = df.groupby("Month", sort=True)[selected_tech].sum() / 4000.0
-
-    # ---------------- Charts ----------------
-    st.subheader(f"Monthly Production for {selected_tech}")
-    tabs = st.tabs(["Average (MW)", "Total (GWh)"])
-
-    with tabs[0]:
-        st.bar_chart(monthly_avg_mw)
-        with st.expander("Show raw monthly averages (MW)"):
-            st.write(monthly_avg_mw.round(2))
-
-    with tabs[1]:
-        st.bar_chart(monthly_gwh)
-        with st.expander("Show raw monthly totals (GWh)"):
-            st.write(monthly_gwh.round(3))
-
-    st.caption(
-        "Notes: Average monthly production is the average power (MW) across all 15‑minute intervals in the month. "
-        "Total monthly energy equals the sum of MW across 15‑minute intervals divided by 4000 (GWh)."
-    )
+    
 
