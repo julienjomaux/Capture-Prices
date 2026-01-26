@@ -94,7 +94,7 @@ else:
         # If you need semicolon delimiter:
         # df = pd.read_csv(io.StringIO(csv_content), delimiter=';')
         df['Date (GMT+1)'] = pd.to_datetime(df['Date (GMT+1)'])
-    return df
+        return df
     
     technologies = [
         "Cross border electricity trading","Hydro Run-of-River","Biomass","Fossil brown coal / lignite",
@@ -119,6 +119,7 @@ else:
         st.write(monthly_gwh.round(2))
     
     st.caption("Total monthly production: values sum per month divided by 4000 (GWh).")
+
 
 
 
