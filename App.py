@@ -182,3 +182,52 @@ else:
         except Exception:
             return idx.astype(str)
 
+    # Create a single figure with 3 rows of subplots
+    fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(14, 12), sharex=True)
+    plt.subplots_adjust(hspace=0.35)
+
+    # Subplot 1: Monthly Total Energy (GWh)
+    ax = axes[0]
+    x1 = _labels(monthly_gwh.index)
+    ax.bar(x1, monthly_gwh.values, color="#2E86DE", edgecolor="#1B4F72")
+    ax.set_title(f"Monthly Total Energy – {selected_col} (2025)", fontsize=14, pad=12)
+    ax.set_ylabel("Energy (GWh)", fontsize=12)
+    ax.grid(axis="y", linestyle="--", alpha=0.4)
+
+    # Subplot 2: Monthly Capture Value (M€)
+    ax = axes[1]
+    if not capture_meur.empty:
+        x2 = _labels(capture_meur.index)
+        ax.bar(x2, capture_meur.values, color="#27AE60", edgecolor="#145A32")
+        ax.set_title(f"Monthly Capture Value – {selected_col} × {price_col} (2025)", fontsize=14, pad=12)
+        ax.set_ylabel("Capture (M€)", fontsize=12)
+        ax.grid(axis="y", linestyle="--", alpha=0.4)
+    else:
+        ax.text(0.5, 0.5, "Price column not found – capture value unavailable", ha="center", va="center", transform=ax.transAxes)
+        ax.axis("off")
+
+    # Subplot 3: Monthly Capture Price (€/MWh)
+    ax = axes[2]
+    if not capture_meur.empty and not capture_price_eur_per_mwh.empty:
+        x3 = _labels(capture_price_eur_per_mwh.index)
+        ax.bar(x3, capture_price_eur_per_mwh.values, color="#8E44AD", edgecolor="#4A235A")
+        ax.set_title(f"Monthly Capture Price – {selected_col} (2025)", fontsize=14, pad=12)
+        ax.set_xlabel("Month (YYYY-MM)", fontsize=12)
+        ax.set_ylabel("Capture Price (€/MWh)", fontsize=12)
+        ax.grid(axis="y", linestyle="--", alpha=0.4)
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+    else:
+        ax.text(0.5, 0.5, "Price column not found – capture price unavailable", ha="center", va="center", transform=ax.transAxes)
+        ax.axis("off")
+
+    st.pyplot(fig, use_container_width=True)
+
+    # ---------------- Raw data at the end only ----------------
+    with st.expander("Show raw aggregated data (click to expand)"):
+        out = pd.DataFrame(index=monthly_gwh.index)
+        out["Monthly Energy (GWh)"] = monthly_gwh.round(3)
+        if not capture_meur.empty:
+            out["Monthly Capture (M€)"] = capture_meur.reindex(out.index).round(3)
+        if not capture_price_eur_per_mwh.empty:
+            out["Monthly Capture Price (€/MWh)"] = capture_price_eur_per_mwh.reindex(out.index).round(2)
+        st.dataframe(out)
