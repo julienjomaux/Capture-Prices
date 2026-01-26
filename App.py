@@ -78,11 +78,46 @@ is_logged_in = st.session_state.get('logged_in', False)
 if not is_logged_in:
     st.info("🔒 Please log in with the password above to access the charts.")
 else:
-    # -------------------------------
-    # Year selection
-    # -------------------------------
-    year = st.selectbox(
-        "Select year:",
-        [2021, 2022, 2023, 2024, 2025],
-        index=4
-    )
+    @st.cache_data
+    def load_data(file_path):
+        with open(file_path, encoding='utf-8-sig') as f:
+            lines = f.readlines()
+        csv_content = ''.join([lines[0]] + lines[2:])
+        df = pd.read_csv(io.StringIO(csv_content))
+        df['Date (GMT+1)'] = pd.to_datetime(df['Date (GMT+1)'])
+        return df
+    
+    uploaded_file = st.file_uploader("Upload Germany 2025.csv", type="csv")
+    if uploaded_file is not None:
+        content = uploaded_file.read().decode("utf-8-sig")
+        lines = content.splitlines()
+        csv_content = '\n'.join([lines[0]] + lines[2:])
+        df = pd.read_csv(io.StringIO(csv_content))
+        df['Date (GMT+1)'] = pd.to_datetime(df['Date (GMT+1)'])
+    else:
+        try:
+            df = load_data("Germany 2025.csv")
+            st.info("Loaded Germany 2025.csv from current directory.")
+        except Exception as e:
+            st.warning("No file loaded. Please upload Germany 2025.csv.")
+            st.stop()
+    
+    technologies = [
+        "Cross border electricity trading","Hydro Run-of-River","Biomass","Fossil brown coal / lignite",
+        "Fossil hard coal","Fossil oil","Fossil coal-derived gas","Fossil gas","Geothermal",
+        "Hydro water reservoir","Hydro pumped storage","Others","Waste","Wind offshore",
+        "Wind onshore","Solar"
+    ]
+    
+    st.subheader("Select the technology to visualize:")
+    selected_tech = st.selectbox("Technology", technologies)
+    
+    # Add Month column for grouping
+    df['Month'] = df['Date (GMT+1)'].dt.to_period('M').dt.to_timestamp()
+    
+    # Aggregate sums by month, convert to GWh
+    monthly_sum = df.groupby('Month')[selected_tech].sum() / 4000
+    
+    # Plot
+    st.subheader(f"Monthly Total Production for {selected_tech} (in GWh)")
+    st.bar_chart(monthly_sum)
