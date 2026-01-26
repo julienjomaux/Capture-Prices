@@ -106,9 +106,10 @@ else:
 
     
     
-    # ---------------- Monthly average bar chart (dropdown + chart) ----------------
+   
+    # ---------------- Monthly totals (2025 only) + Capture plot ----------------
 
-    # 0) Normalize column names to avoid invisible chars and extra spaces
+    # 0) Normalize column names (defensive against BOM/ZWSP/spaces)
     df.columns = (
         df.columns.astype(str)
         .str.replace("\ufeff", "", regex=False)  # BOM
@@ -116,92 +117,113 @@ else:
         .str.strip()
     )
 
-    # 1) Determine the date column as the FIRST column, per your file layout
+    # 1) Identify the date column as the first column (your CSV format)
     date_col = df.columns[0]  # should be "Date (GMT+1)"
-    # Optional: assert it's the expected name; we keep the first column anyway
-    # but this helps you notice if the header changed.
-    if "date" not in date_col.lower():
-        st.warning(f"The first column doesn't look like a date: '{date_col}'. Proceeding anyway.")
 
-    # 2) Drop the units row (row immediately after the header) if it looks like units
-    #    Heuristic: if first data row contains many "Power (MW)" or "Price (" tokens -> drop it
+    # 2) Drop the units row if present (the row just after header)
     if not df.empty:
         first_row_str = df.iloc[0].astype(str).str.lower()
         units_hits = first_row_str.str.contains(r"power\s*\(mw\)|price\s*\(", regex=True).mean()
         if units_hits > 0.3:
             df = df.iloc[1:].reset_index(drop=True)
 
-    # 3) Parse the date column robustly:
-    #    Use utc=True to parse timezone offsets like +01:00 reliably, then drop tz for .dt ops.
+    # 3) Parse datetime robustly, accepting timezone (+01:00), then drop tz
     s = df[date_col].astype(str).str.strip().replace({"": pd.NA})
     df[date_col] = pd.to_datetime(s, errors="coerce", utc=True)
-
-    # Drop rows where date couldn't be parsed
-    bad_dates = int(df[date_col].isna().sum())
-    if bad_dates > 0:
-        st.warning(f"Dropping {bad_dates} rows with unparseable dates in '{date_col}'.")
     df = df[df[date_col].notna()].copy()
-
-    # Remove timezone (make naive) for consistent .dt behavior
-    # At this point it's datetime64[ns, UTC]; convert to naive local-like timestamps
     df[date_col] = df[date_col].dt.tz_convert("UTC").dt.tz_localize(None)
 
-    # SAFETY CHECK: ensure datetimelike before using .dt
-    if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
-        st.error(
-            f"Date column '{date_col}' is not datetimelike after parsing. "
-            f"Dtype = {df[date_col].dtype}. Showing samples below."
-        )
-        st.write(df[[date_col]].head(10))
-        st.stop()
-
-    # 4) Create Month column (first day-of-month as Timestamp)
+    # 4) Month column
     df["Month"] = df[date_col].dt.to_period("M").dt.to_timestamp()
 
-    # 5) Build dropdown of all column names except date and Month
-    meta_cols = {date_col, "Month"}
-    value_cols = [c for c in df.columns if c not in meta_cols]
+    # 5) Keep only months in 2025
+    df_2025 = df[df["Month"].dt.year == 2025].copy()
+    if df_2025.empty:
+        st.warning("No data available for 2025 after filtering.")
+        st.stop()
 
-    st.subheader("Select a column to plot its monthly average:")
+    # 6) Build dropdown of columns, excluding date, Month, and Day Ahead Auction
+    # Try to locate the price column robustly
+    price_col = "Day Ahead Auction (DE-LU)"
+    if price_col not in df_2025.columns:
+        alt = "Day-ahead Auction (DE-LU)"
+        if alt in df_2025.columns:
+            price_col = alt
+        else:
+            possibles = [c for c in df_2025.columns if "auction" in c.lower() and "de-lu" in c.lower()]
+            price_col = possibles[0] if possibles else None
+
+    meta_cols = {date_col, "Month"}
+    exclude_cols = set(meta_cols)
+    if price_col is not None:
+        exclude_cols.add(price_col)
+
+    value_cols = [c for c in df_2025.columns if c not in exclude_cols]
+
+    st.subheader("Select a column to plot its monthly totals (GWh):")
     selected_col = st.selectbox("Column", options=sorted(value_cols))
 
-    # 6) Ensure selected column is numeric (coerce if needed)
-    df[selected_col] = pd.to_numeric(df[selected_col], errors="coerce")
+    # 7) Ensure numeric types
+    df_2025[selected_col] = pd.to_numeric(df_2025[selected_col], errors="coerce")
+    if price_col is not None:
+        df_2025[price_col] = pd.to_numeric(df_2025[price_col], errors="coerce")
 
-   
+    # 8) Monthly total energy (GWh): sum(MW) * 0.25h / 1000 = sum(MW) / 4000
+    monthly_gwh = df_2025.groupby("Month", sort=True)[selected_col].sum() / 4000.0
 
-    # 6) Compute monthly total energy in GWh: sum(MW) * 0.25 h / 1000 = sum(MW) / 4000
-    monthly_gwh = df.groupby("Month", sort=True)[selected_col].sum() / 4000.0
-    
-    # 7) Plot with matplotlib (plt)
-    st.subheader(f"Monthly Total Energy of '{selected_col}' (GWh)")
-    
-    # Robust handling of index types for labels
+    st.subheader(f"Monthly Total Energy of '{selected_col}' in 2025 (GWh)")
+
+    # Labels for x-axis (robust handling of index type)
     idx = monthly_gwh.index
     try:
-        # If DatetimeIndex -> strftime works
         x_labels = idx.strftime("%Y-%m")
     except Exception:
-        # Fallback: stringify (works for PeriodIndex or plain Index)
         x_labels = idx.astype(str)
-    
     y = monthly_gwh.values
-    
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.bar(x_labels, y, color="#2E86DE", edgecolor="#1B4F72")
-    
-    ax.set_title(f"Monthly Total Energy – {selected_col}", fontsize=14, pad=12)
-    ax.set_xlabel("Month (YYYY-MM)", fontsize=12)
-    ax.set_ylabel("Energy (GWh)", fontsize=12)
-    
-    ax.grid(axis="y", linestyle="--", alpha=0.4)
+
+    fig1, ax1 = plt.subplots(figsize=(12, 5))
+    ax1.bar(x_labels, y, color="#2E86DE", edgecolor="#1B4F72")
+    ax1.set_title(f"Monthly Total Energy – {selected_col} (2025)", fontsize=14, pad=12)
+    ax1.set_xlabel("Month (YYYY-MM)", fontsize=12)
+    ax1.set_ylabel("Energy (GWh)", fontsize=12)
+    ax1.grid(axis="y", linestyle="--", alpha=0.4)
     plt.xticks(rotation=45, ha="right")
     plt.tight_layout()
-    
-    st.pyplot(fig)
-    
+    st.pyplot(fig1)
+
     with st.expander("Show raw monthly totals (GWh)"):
         st.write(monthly_gwh.round(3))
+
+    # 9) Capture value (M€ / month): sum over month of (production * price) / 4,000,000
+    #    Explanation: production is MW, price is EUR/MWh, 15-min energy = MW*0.25h,
+    #    monthly revenue EUR = sum(MW * EUR/MWh * 0.25). In M€ => divide by 1e6 → same as sum(MW*Price)/4,000,000.
+    if price_col is None:
+        st.warning("Price column 'Day Ahead Auction (DE-LU)' not found; skipping Capture plot.")
+    else:
+        capture_meur = (df_2025[selected_col] * df_2025[price_col]).groupby(df_2025["Month"]).sum() / 4_000_000.0
+
+        st.subheader(f"Monthly Capture Value for '{selected_col}' in 2025 (M€)")
+
+        idx2 = capture_meur.index
+        try:
+            x_labels2 = idx2.strftime("%Y-%m")
+        except Exception:
+            x_labels2 = idx2.astype(str)
+        y2 = capture_meur.values
+
+        fig2, ax2 = plt.subplots(figsize=(12, 5))
+        ax2.bar(x_labels2, y2, color="#27AE60", edgecolor="#145A32")
+        ax2.set_title(f"Monthly Capture Value – {selected_col} × {price_col} (2025)", fontsize=14, pad=12)
+        ax2.set_xlabel("Month (YYYY-MM)", fontsize=12)
+        ax2.set_ylabel("Capture (M€)", fontsize=12)
+        ax2.grid(axis="y", linestyle="--", alpha=0.4)
+        plt.xticks(rotation=45, ha="right")
+        plt.tight_layout()
+        st.pyplot(fig2)
+
+        with st.expander("Show raw monthly capture (M€)"):
+            st.write(capture_meur.round(3))
+
 
 
 
