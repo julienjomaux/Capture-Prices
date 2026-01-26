@@ -81,72 +81,33 @@ if not is_logged_in:
     st.stop()
 else:
     # ---------------- Data Loading ----------------
-    @st.cache_data(show_spinner=True)
-    def load_data(files_glob: str = "Germany *.csv"):
-        """
-        Load one or multiple CSV files (e.g., 'Germany 2021.csv' ... 'Germany 2025.csv'),
-        auto-detect delimiter, and return a single DataFrame along with likely date columns.
-        Also drops a second 'units' header row if present (e.g., ',Power (MW),Power (MW),...').
-        """
-        paths = sorted(glob.glob(files_glob))
-        if not paths:
-            if os.path.exists("Germany 2025.csv"):
-                paths = ["Germany 2025.csv"]
-            else:
-                raise FileNotFoundError(
-                    "No matching files found. Please place files like 'Germany 2025.csv' "
-                    "or 'Germany 2021.csv'…'Germany 2025.csv' in the app folder."
-                )
-
-        dfs = []
-        for p in paths:
-            # Let pandas sniff the delimiter
-            df = pd.read_csv(p, encoding="utf-8-sig", sep=None, engine="python")
-            df["__SourceFile"] = os.path.basename(p)
-
-            # If the very first data row looks like a units row (Power (MW), Price (EUR/MWh), etc.), drop it.
-            if not df.empty:
-                first_row_str = df.iloc[0].astype(str)
-                # Count how many columns contain 'power (mw)' or 'price (' => heuristic for a units header row
-                units_hits = first_row_str.str.lower().str.contains(r"power\s*\(mw\)|price\s*\(", regex=True).mean()
-                # If > 30% of columns are 'units', this row is almost certainly the units header => drop it
-                if units_hits > 0.3:
-                    df = df.iloc[1:].reset_index(drop=True)
-
-            dfs.append(df)
-
-        df_all = pd.concat(dfs, ignore_index=True)
-
-        # Identify likely date columns (by name patterns)
-        name_candidates = [
-            "Date (GMT+1)", "Date", "Datetime", "Timestamp", "Time (GMT+1)",
-            "date", "time", "datetime", "period", "delivery_start", "delivery time",
-        ]
-        # Also include any column whose name contains date-like words
-        for c in list(df_all.columns):
-            if any(key in str(c).lower() for key in ["date", "time", "timestamp"]):
-                if c not in name_candidates:
-                    name_candidates.append(c)
-
-        existing_candidates = [c for c in name_candidates if c in df_all.columns]
-        return df_all, existing_candidates
-
+   
+    @st.cache_data
+    def load_df(filepath: str):
+        return pd.read_csv(
+            filepath,
+            encoding="utf-8-sig",   # handles BOM safely
+            sep=",",                # your file is comma-separated
+            engine="python"
+        )
     
-
-    # ---------------- Load & Parse ----------------
+    # Change this if needed
+    CSV_FILE = "Germany 2025.csv"
+    
     try:
-        df, date_col_candidates = load_data()
+        df = load_df(CSV_FILE)
+        st.success("CSV loaded successfully ✅")
     except Exception as e:
-        st.error(f"❌ Data loading error: {e}")
+        st.error(f"Failed to load CSV: {e}")
         st.stop()
-
-
-    # Create Month column (first day of the month timestamp)
     
+    # ---------------- Show first 50 rows ----------------
+    st.subheader("First 50 rows of the CSV")
     st.dataframe(df.head(50))
 
 
     # ---------------- Make numeric value columns numeric ----------------
     
+
 
 
