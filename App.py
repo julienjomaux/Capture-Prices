@@ -143,9 +143,10 @@ else:
 
     # Create Month column (first day of the month timestamp)
     
-    st.dataframe(df)
-    df["Month"] = df[date_col].dt.to_period("M").dt.to_timestamp()
+    st.dataframe(df.head(50))
+
 
     # ---------------- Make numeric value columns numeric ----------------
     
+
 
