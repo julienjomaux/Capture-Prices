@@ -154,4 +154,5 @@ else:
     # Optional: show raw values
     with st.expander("Show raw monthly averages"):
         st.write(monthly_avg.round(3))
-``
+
+
