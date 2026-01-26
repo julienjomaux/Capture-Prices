@@ -80,15 +80,20 @@ if not is_logged_in:
 else:
     @st.cache_data
     def load_data():
-        # Read the file, skip the second line
-        with open("Germany 2025.csv", encoding='utf-8-sig') as f:
+        file_path = "Germany 2025.csv"
+        with open(file_path, encoding="utf-8-sig") as f:
             lines = f.readlines()
-        # Keep the header and data, skip the second line
+        # Remove blank lines if any
+        lines = [line for line in lines if line.strip()]
+        # Keep header, skip second line, use rest
         csv_content = ''.join([lines[0]] + lines[2:])
+        # If comma separator is used, do NOT specify delimiter
+        # If semicolon, add delimiter=';'
         df = pd.read_csv(io.StringIO(csv_content))
+        # If you need semicolon delimiter:
+        # df = pd.read_csv(io.StringIO(csv_content), delimiter=';')
         df['Date (GMT+1)'] = pd.to_datetime(df['Date (GMT+1)'])
-        return df
-    df = load_data()
+    return df
     
     technologies = [
         "Cross border electricity trading","Hydro Run-of-River","Biomass","Fossil brown coal / lignite",
@@ -113,6 +118,7 @@ else:
         st.write(monthly_gwh.round(2))
     
     st.caption("Total monthly production: values sum per month divided by 4000 (GWh).")
+
 
 
 
