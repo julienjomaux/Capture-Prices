@@ -104,37 +104,68 @@ else:
     st.subheader("First 50 rows of the CSV")
     st.dataframe(df.head(50))
 
+    
     # ---------------- Monthly average bar chart (dropdown + chart) ----------------
-    # 1) Skip the units row (the row immediately after the headers)
+
+    # 0) Normalize column names to avoid hidden chars (BOM/ZWSP) and trailing spaces
+    df.columns = (
+        df.columns
+          .astype(str)
+          .str.replace("\ufeff", "", regex=False)   # BOM
+          .str.replace("\u200b", "", regex=False)   # zero-width space
+          .str.strip()
+    )
+
+    # 1) Skip the units row (the row immediately after the header)
+    #    Heuristic: if the first data row contains many "Power (MW)" / "Price (" tokens → drop it
     if not df.empty:
         first_row_str = df.iloc[0].astype(str).str.lower()
         units_hits = first_row_str.str.contains(r"power\s*\(mw\)|price\s*\(", regex=True).mean()
         if units_hits > 0.3:
             df = df.iloc[1:].reset_index(drop=True)
 
-    # 2) Parse the date column (first column): "Date (GMT+1)" has ISO8601 with tz like 2025-01-01T00:00+01:00
+    # 2) Parse the date column (first column): "Date (GMT+1)" like 2025-01-01T00:00+01:00
+    #    (Make sure the name exists after normalization)
     date_col = "Date (GMT+1)"
     if date_col not in df.columns:
-        st.error(f"Expected date column '{date_col}' not found in CSV.")
+        # Try to auto-find a similar name if it was slightly different
+        possible = [c for c in df.columns if "date" in c.lower()]
+        st.error(
+            f"Expected date column '{date_col}' not found. "
+            f"Columns with 'date' detected: {possible}"
+        )
         st.stop()
 
-    # Convert to datetime (timezone-aware), then drop timezone to make it naive (consistent for .dt ops)
-    df[date_col] = pd.to_datetime(df[date_col].astype(str).str.strip(),
-                                  format="%Y-%m-%dT%H:%M%z",
-                                  errors="coerce")
+    # Parse to datetime (timezone-aware)
+    # Use explicit format to match e.g. '2025-01-01T00:15+01:00'
+    df[date_col] = pd.to_datetime(
+        df[date_col].astype(str).str.strip(),
+        format="%Y-%m-%dT%H:%M%z",
+        errors="coerce"
+    )
+
     # Drop rows where date couldn't be parsed
+    bad_dates = df[date_col].isna().sum()
+    if bad_dates > 0:
+        st.warning(f"Dropping {bad_dates} rows with unparseable dates.")
     df = df[df[date_col].notna()].copy()
 
+    # Remove timezone to make timestamps naive for consistent .dt ops
     if pd.api.types.is_datetime64tz_dtype(df[date_col]):
         try:
             df[date_col] = df[date_col].dt.tz_localize(None)
         except (TypeError, AttributeError):
             df[date_col] = df[date_col].dt.tz_convert("UTC").dt.tz_localize(None)
 
-    # 3) Create a Month column for grouping (first day of month timestamp)
+    # Safety diagnostics (very helpful if something goes wrong)
+    # st.write("Date dtype:", df[date_col].dtype)
+    # st.write("Sample dates:", df[date_col].head(5))
+
+    # 3) Create a Month column for grouping
+    #    (Now that the dtype is datetime64[ns], .dt works without error)
     df["Month"] = df[date_col].dt.to_period("M").dt.to_timestamp()
 
-    # 4) Build dropdown of all column names except Date and Month
+    # 4) Dropdown of all columns except Date and Month
     meta_cols = {date_col, "Month"}
     value_cols = [c for c in df.columns if c not in meta_cols]
 
@@ -154,5 +185,7 @@ else:
     # Optional: show raw values
     with st.expander("Show raw monthly averages"):
         st.write(monthly_avg.round(3))
+
+
 
 
