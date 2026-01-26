@@ -85,15 +85,7 @@ else:
             lines = f.readlines()
         # Remove blank lines if any
         st.write(repr(lines[:5]))
-        lines = [line for line in lines if line.strip()]
-        # Keep header, skip second line, use rest
-        csv_content = ''.join([lines[0]] + lines[2:])
-        # If comma separator is used, do NOT specify delimiter
-        # If semicolon, add delimiter=';'
-        df = pd.read_csv(io.StringIO(csv_content))
-        # If you need semicolon delimiter:
-        # df = pd.read_csv(io.StringIO(csv_content), delimiter=';')
-        df['Date (GMT+1)'] = pd.to_datetime(df['Date (GMT+1)'])
+  
         return df
     load_data()
     technologies = [
@@ -119,6 +111,7 @@ else:
         st.write(monthly_gwh.round(2))
     
     st.caption("Total monthly production: values sum per month divided by 4000 (GWh).")
+
 
 
 
