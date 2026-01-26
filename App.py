@@ -81,7 +81,6 @@ if not is_logged_in:
     st.stop()
 else:
     # ---------------- Data Loading ----------------
-   
     @st.cache_data
     def load_df(filepath: str):
         return pd.read_csv(
@@ -105,9 +104,54 @@ else:
     st.subheader("First 50 rows of the CSV")
     st.dataframe(df.head(50))
 
+    # ---------------- Monthly average bar chart (dropdown + chart) ----------------
+    # 1) Skip the units row (the row immediately after the headers)
+    if not df.empty:
+        first_row_str = df.iloc[0].astype(str).str.lower()
+        units_hits = first_row_str.str.contains(r"power\s*\(mw\)|price\s*\(", regex=True).mean()
+        if units_hits > 0.3:
+            df = df.iloc[1:].reset_index(drop=True)
 
-    # ---------------- Make numeric value columns numeric ----------------
-    
+    # 2) Parse the date column (first column): "Date (GMT+1)" has ISO8601 with tz like 2025-01-01T00:00+01:00
+    date_col = "Date (GMT+1)"
+    if date_col not in df.columns:
+        st.error(f"Expected date column '{date_col}' not found in CSV.")
+        st.stop()
 
+    # Convert to datetime (timezone-aware), then drop timezone to make it naive (consistent for .dt ops)
+    df[date_col] = pd.to_datetime(df[date_col].astype(str).str.strip(),
+                                  format="%Y-%m-%dT%H:%M%z",
+                                  errors="coerce")
+    # Drop rows where date couldn't be parsed
+    df = df[df[date_col].notna()].copy()
 
+    if pd.api.types.is_datetime64tz_dtype(df[date_col]):
+        try:
+            df[date_col] = df[date_col].dt.tz_localize(None)
+        except (TypeError, AttributeError):
+            df[date_col] = df[date_col].dt.tz_convert("UTC").dt.tz_localize(None)
 
+    # 3) Create a Month column for grouping (first day of month timestamp)
+    df["Month"] = df[date_col].dt.to_period("M").dt.to_timestamp()
+
+    # 4) Build dropdown of all column names except Date and Month
+    meta_cols = {date_col, "Month"}
+    value_cols = [c for c in df.columns if c not in meta_cols]
+
+    st.subheader("Select a column to plot its monthly average:")
+    selected_col = st.selectbox("Column", options=sorted(value_cols))
+
+    # 5) Ensure the selected column is numeric (coerce if needed)
+    df[selected_col] = pd.to_numeric(df[selected_col], errors="coerce")
+
+    # 6) Compute monthly average (mean over all timestamps within each month)
+    monthly_avg = df.groupby("Month", sort=True)[selected_col].mean()
+
+    # 7) Show the bar chart
+    st.subheader(f"Monthly Average of '{selected_col}'")
+    st.bar_chart(monthly_avg)
+
+    # Optional: show raw values
+    with st.expander("Show raw monthly averages"):
+        st.write(monthly_avg.round(3))
+``
