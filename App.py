@@ -7,11 +7,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # ---------------- Page config (robust to missing icon) ----------------
-try:
-    st.set_page_config(layout="wide", page_icon="GEM.webp")
-except Exception:
-    st.set_page_config(layout="wide")
-st.title("aFRR Capacity Prices in Germany (2021–2025)")
+
+st.set_page_config(layout="wide", page_icon="GEM.webp")
+st.title("Average Monthly Generation and Capture Prices")
 
 # ---------------- Utilities ----------------
 def get_config_value(key: str, default: Optional[str] = None) -> Optional[str]:
@@ -30,11 +28,8 @@ secret_password = get_config_value('SECRET_PASSWORD', '')
 # ---------------- Description / CTA ----------------
 st.markdown(
     """
-This app presents heatmaps and daily views of aFRR (automatic Frequency Restoration Reserve) 
-capacity prices in Germany for the years 2021–2025. 
+This app presents the average Generation, captured value and capture prices of Generation in Germany for the last few years. 
 
-- **Heatmaps:** Show monthly average, maximal average, and maximal marginal capacity prices per month and 4-hour product.
-- **Daily view:** Displays capacity prices for all 12 products for a selected day.
 
 **Data source:** Regelleistung.net
 
@@ -231,3 +226,4 @@ else:
         if not capture_price_eur_per_mwh.empty:
             out["Monthly Capture Price (€/MWh)"] = capture_price_eur_per_mwh.reindex(out.index).round(2)
         st.dataframe(out)
+
