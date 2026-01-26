@@ -79,9 +79,11 @@ if not is_logged_in:
     st.info("🔒 Please log in with the password above to access the charts.")
 else:
     @st.cache_data
-    def load_data(file_path):
-        with open(file_path, encoding='utf-8-sig') as f:
+    def load_data():
+        # Read the file, skip the second line
+        with open("Germany 2025.csv", encoding='utf-8-sig') as f:
             lines = f.readlines()
+        # Keep the header and data, skip the second line
         csv_content = ''.join([lines[0]] + lines[2:])
         df = pd.read_csv(io.StringIO(csv_content))
         df['Date (GMT+1)'] = pd.to_datetime(df['Date (GMT+1)'])
@@ -121,3 +123,4 @@ else:
     # Plot
     st.subheader(f"Monthly Total Production for {selected_tech} (in GWh)")
     st.bar_chart(monthly_sum)
+
