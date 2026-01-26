@@ -1,6 +1,8 @@
 
 import os
 from typing import Optional
+import re  # NEW
+import glob  # NEW
 
 import streamlit as st
 import pandas as pd
@@ -79,16 +81,36 @@ else:
             sep=",",                # your file is comma-separated
             engine="python"
         )
-    
-    # Change this if needed
-    CSV_FILE = "Germany 2025.csv"
-    
+
+    # ---- NEW: discover available years & let user pick a year ----
+    BASE_PREFIX = "Germany"  # change this if your prefix differs
+    def list_available_years(prefix: str = BASE_PREFIX):
+        years = []
+        for path in glob.glob(f"{prefix} *.csv"):
+            fname = os.path.basename(path)
+            m = re.match(rf"^{re.escape(prefix)}\s+(\d{{4}})\.csv$", fname)
+            if m:
+                years.append(int(m.group(1)))
+        return sorted(set(years))
+
+    available_years = list_available_years()
+    if not available_years:
+        st.error(f"No CSV files found with pattern '{BASE_PREFIX} <YEAR>.csv' in this folder.")
+        st.stop()
+
+    # Default to the latest available year
+    default_index = len(available_years) - 1
+    selected_year = st.selectbox("Select year", options=available_years, index=default_index)  # NEW
+
+    # Build the filename from the selection
+    CSV_FILE = f"{BASE_PREFIX} {selected_year}.csv"  # UPDATED
+
     try:
         df = load_df(CSV_FILE)
     except Exception as e:
-        st.error(f"Failed to load CSV: {e}")
+        st.error(f"Failed to load CSV '{CSV_FILE}': {e}")
         st.stop()
-    
+
     # ---------------- Cleaning / Preparation ----------------
     # 0) Normalize column names (defensive against BOM/ZWSP/spaces)
     df.columns = (
@@ -117,20 +139,20 @@ else:
     # 4) Month column
     df["Month"] = df[date_col].dt.to_period("M").dt.to_timestamp()
 
-    # 5) Keep only months in 2025
-    df_2025 = df[df["Month"].dt.year == 2025].copy()
-    if df_2025.empty:
-        st.warning("No data available for 2025 after filtering.")
+    # 5) Keep only months in selected year (UPDATED)
+    df_year = df[df["Month"].dt.year == selected_year].copy()
+    if df_year.empty:
+        st.warning(f"No data available for {selected_year} after filtering.")
         st.stop()
 
     # 6) Try to locate the price column robustly
     price_col = "Day Ahead Auction (DE-LU)"
-    if price_col not in df_2025.columns:
+    if price_col not in df_year.columns:
         alt = "Day-ahead Auction (DE-LU)"
-        if alt in df_2025.columns:
+        if alt in df_year.columns:
             price_col = alt
         else:
-            possibles = [c for c in df_2025.columns if "auction" in c.lower() and "de-lu" in c.lower()]
+            possibles = [c for c in df_year.columns if "auction" in c.lower() and "de-lu" in c.lower()]
             price_col = possibles[0] if possibles else None
 
     # Build list of selectable energy columns (exclude date/month/price)
@@ -138,18 +160,18 @@ else:
     exclude_cols = set(meta_cols)
     if price_col is not None:
         exclude_cols.add(price_col)
-    value_cols = [c for c in df_2025.columns if c not in exclude_cols]
+    value_cols = [c for c in df_year.columns if c not in exclude_cols]
 
     selected_col = st.selectbox("Select the column to analyze (energy series in MW):", options=sorted(value_cols))
 
     # Ensure numeric
-    df_2025[selected_col] = pd.to_numeric(df_2025[selected_col], errors="coerce")
+    df_year[selected_col] = pd.to_numeric(df_year[selected_col], errors="coerce")
     if price_col is not None:
-        df_2025[price_col] = pd.to_numeric(df_2025[price_col], errors="coerce")
+        df_year[price_col] = pd.to_numeric(df_year[price_col], errors="coerce")
 
     # ---------------- Aggregations ----------------
     # Monthly total energy (GWh): sum(MW) * 0.25h / 1000 = sum(MW) / 4000
-    monthly_gwh = df_2025.groupby("Month", sort=True)[selected_col].sum() / 4000.0
+    monthly_gwh = df_year.groupby("Month", sort=True)[selected_col].sum() / 4000.0
 
     # Capture value (M€ / month): sum(MW * EUR/MWh * 0.25) / 1e6 = sum(MW*Price)/4_000_000
     if price_col is None:
@@ -157,7 +179,7 @@ else:
         capture_meur = pd.Series(dtype=float)
         capture_price_eur_per_mwh = pd.Series(dtype=float)
     else:
-        capture_meur = (df_2025[selected_col] * df_2025[price_col]).groupby(df_2025["Month"]).sum() / 4_000_000.0
+        capture_meur = (df_year[selected_col] * df_year[price_col]).groupby(df_year["Month"]).sum() / 4_000_000.0
 
         # Capture Price (€/MWh) = (Monthly Capture M€ / Monthly Production GWh) * 1000
         common_index = monthly_gwh.index.intersection(capture_meur.index)
@@ -184,7 +206,7 @@ else:
     ax = axes[0]
     x1 = _labels(monthly_gwh.index)
     ax.bar(x1, monthly_gwh.values, color="#2E86DE", edgecolor="#1B4F72")
-    ax.set_title(f"Monthly Total Energy – {selected_col} (2025)", fontsize=14, pad=12)
+    ax.set_title(f"Monthly Total Energy – {selected_col} ({selected_year})", fontsize=14, pad=12)  # UPDATED
     ax.set_ylabel("Energy (GWh)", fontsize=12)
     ax.grid(axis="y", linestyle="--", alpha=0.4)
 
@@ -193,7 +215,7 @@ else:
     if not capture_meur.empty:
         x2 = _labels(capture_meur.index)
         ax.bar(x2, capture_meur.values, color="#27AE60", edgecolor="#145A32")
-        ax.set_title(f"Monthly Capture Value – {selected_col} × {price_col} (2025)", fontsize=14, pad=12)
+        ax.set_title(f"Monthly Capture Value – {selected_col} × {price_col} ({selected_year})", fontsize=14, pad=12)  # UPDATED
         ax.set_ylabel("Capture (M€)", fontsize=12)
         ax.grid(axis="y", linestyle="--", alpha=0.4)
     else:
@@ -205,7 +227,7 @@ else:
     if not capture_meur.empty and not capture_price_eur_per_mwh.empty:
         x3 = _labels(capture_price_eur_per_mwh.index)
         ax.bar(x3, capture_price_eur_per_mwh.values, color="#8E44AD", edgecolor="#4A235A")
-        ax.set_title(f"Monthly Capture Price – {selected_col} (2025)", fontsize=14, pad=12)
+        ax.set_title(f"Monthly Capture Price – {selected_col} ({selected_year})", fontsize=14, pad=12)  # UPDATED
         ax.set_xlabel("Month (YYYY-MM)", fontsize=12)
         ax.set_ylabel("Capture Price (€/MWh)", fontsize=12)
         ax.grid(axis="y", linestyle="--", alpha=0.4)
@@ -225,5 +247,4 @@ else:
         if not capture_price_eur_per_mwh.empty:
             out["Monthly Capture Price (€/MWh)"] = capture_price_eur_per_mwh.reindex(out.index).round(2)
         st.dataframe(out)
-
-
+``
