@@ -84,6 +84,7 @@ else:
         with open(file_path, encoding="utf-8-sig") as f:
             lines = f.readlines()
         # Remove blank lines if any
+        st.write(repr(lines[:5]))
         lines = [line for line in lines if line.strip()]
         # Keep header, skip second line, use rest
         csv_content = ''.join([lines[0]] + lines[2:])
@@ -118,6 +119,7 @@ else:
         st.write(monthly_gwh.round(2))
     
     st.caption("Total monthly production: values sum per month divided by 4000 (GWh).")
+
 
 
 
