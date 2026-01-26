@@ -85,7 +85,6 @@ else:
     
     try:
         df = load_df(CSV_FILE)
-        st.success("CSV loaded successfully ✅")
     except Exception as e:
         st.error(f"Failed to load CSV: {e}")
         st.stop()
@@ -226,4 +225,5 @@ else:
         if not capture_price_eur_per_mwh.empty:
             out["Monthly Capture Price (€/MWh)"] = capture_price_eur_per_mwh.reindex(out.index).round(2)
         st.dataframe(out)
+
 
