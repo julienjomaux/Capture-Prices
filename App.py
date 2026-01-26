@@ -247,4 +247,5 @@ else:
         if not capture_price_eur_per_mwh.empty:
             out["Monthly Capture Price (€/MWh)"] = capture_price_eur_per_mwh.reindex(out.index).round(2)
         st.dataframe(out)
-``
+
+
