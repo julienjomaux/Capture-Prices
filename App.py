@@ -1,15 +1,10 @@
 
 import os
-import glob
 from typing import Optional
 
 import streamlit as st
 import pandas as pd
-
-# Optional plotting libs if you extend later
 import matplotlib.pyplot as plt
-import seaborn as sns
-import plotly.graph_objects as go
 
 # ---------------- Page config (robust to missing icon) ----------------
 try:
@@ -50,7 +45,7 @@ capacity prices in Germany for the years 2021–2025.
 )
 
 st.markdown(
-    f"""
+    """
 If you want to access all the apps of GEM Energy Analytics, please sign up following the link below.
 
 Currently, the fee is 30 € per month. When the payment is done, you will receive a password that will grant you access to all apps. Every month, you will receive an email with a new password to access the apps (except if you unsubscribe). 
@@ -100,15 +95,7 @@ else:
         st.error(f"Failed to load CSV: {e}")
         st.stop()
     
-    # ---------------- Show first 50 rows ----------------
-    st.subheader("First 50 rows of the CSV")
-    st.dataframe(df.head(50))
-
-    
-    
-   
-    # ---------------- Monthly totals (2025 only) + Capture plot ----------------
-
+    # ---------------- Cleaning / Preparation ----------------
     # 0) Normalize column names (defensive against BOM/ZWSP/spaces)
     df.columns = (
         df.columns.astype(str)
@@ -118,7 +105,7 @@ else:
     )
 
     # 1) Identify the date column as the first column (your CSV format)
-    date_col = df.columns[0]  # should be "Date (GMT+1)"
+    date_col = df.columns[0]  # should be "Date (GMT+1)" or similar
 
     # 2) Drop the units row if present (the row just after header)
     if not df.empty:
@@ -142,8 +129,7 @@ else:
         st.warning("No data available for 2025 after filtering.")
         st.stop()
 
-    # 6) Build dropdown of columns, excluding date, Month, and Day Ahead Auction
-    # Try to locate the price column robustly
+    # 6) Try to locate the price column robustly
     price_col = "Day Ahead Auction (DE-LU)"
     if price_col not in df_2025.columns:
         alt = "Day-ahead Auction (DE-LU)"
@@ -153,118 +139,46 @@ else:
             possibles = [c for c in df_2025.columns if "auction" in c.lower() and "de-lu" in c.lower()]
             price_col = possibles[0] if possibles else None
 
+    # Build list of selectable energy columns (exclude date/month/price)
     meta_cols = {date_col, "Month"}
     exclude_cols = set(meta_cols)
     if price_col is not None:
         exclude_cols.add(price_col)
-
     value_cols = [c for c in df_2025.columns if c not in exclude_cols]
 
-    st.subheader("Select a column to plot its monthly totals (GWh):")
-    selected_col = st.selectbox("Column", options=sorted(value_cols))
+    selected_col = st.selectbox("Select the column to analyze (energy series in MW):", options=sorted(value_cols))
 
-    # 7) Ensure numeric types
+    # Ensure numeric
     df_2025[selected_col] = pd.to_numeric(df_2025[selected_col], errors="coerce")
     if price_col is not None:
         df_2025[price_col] = pd.to_numeric(df_2025[price_col], errors="coerce")
 
-    # 8) Monthly total energy (GWh): sum(MW) * 0.25h / 1000 = sum(MW) / 4000
+    # ---------------- Aggregations ----------------
+    # Monthly total energy (GWh): sum(MW) * 0.25h / 1000 = sum(MW) / 4000
     monthly_gwh = df_2025.groupby("Month", sort=True)[selected_col].sum() / 4000.0
 
-    st.subheader(f"Monthly Total Energy of '{selected_col}' in 2025 (GWh)")
-
-    # Labels for x-axis (robust handling of index type)
-    idx = monthly_gwh.index
-    try:
-        x_labels = idx.strftime("%Y-%m")
-    except Exception:
-        x_labels = idx.astype(str)
-    y = monthly_gwh.values
-
-    fig1, ax1 = plt.subplots(figsize=(12, 5))
-    ax1.bar(x_labels, y, color="#2E86DE", edgecolor="#1B4F72")
-    ax1.set_title(f"Monthly Total Energy – {selected_col} (2025)", fontsize=14, pad=12)
-    ax1.set_xlabel("Month (YYYY-MM)", fontsize=12)
-    ax1.set_ylabel("Energy (GWh)", fontsize=12)
-    ax1.grid(axis="y", linestyle="--", alpha=0.4)
-    plt.xticks(rotation=45, ha="right")
-    plt.tight_layout()
-    st.pyplot(fig1)
-
-    with st.expander("Show raw monthly totals (GWh)"):
-        st.write(monthly_gwh.round(3))
-
-    # 9) Capture value (M€ / month): sum over month of (production * price) / 4,000,000
-    #    Explanation: production is MW, price is EUR/MWh, 15-min energy = MW*0.25h,
-    #    monthly revenue EUR = sum(MW * EUR/MWh * 0.25). In M€ => divide by 1e6 → same as sum(MW*Price)/4,000,000.
+    # Capture value (M€ / month): sum(MW * EUR/MWh * 0.25) / 1e6 = sum(MW*Price)/4_000_000
     if price_col is None:
-        st.warning("Price column 'Day Ahead Auction (DE-LU)' not found; skipping Capture plot.")
+        st.warning("Price column 'Day Ahead Auction (DE-LU)' not found; skipping Capture calculations.")
+        capture_meur = pd.Series(dtype=float)
+        capture_price_eur_per_mwh = pd.Series(dtype=float)
     else:
         capture_meur = (df_2025[selected_col] * df_2025[price_col]).groupby(df_2025["Month"]).sum() / 4_000_000.0
 
-        st.subheader(f"Monthly Capture Value for '{selected_col}' in 2025 (M€)")
+        # Capture Price (€/MWh) = (Monthly Capture M€ / Monthly Production GWh) * 1000
+        common_index = monthly_gwh.index.intersection(capture_meur.index)
+        monthly_gwh_aligned = monthly_gwh.reindex(common_index)
+        capture_meur_aligned = capture_meur.reindex(common_index)
 
-        idx2 = capture_meur.index
+        with pd.option_context("mode.use_inf_as_na", True):
+            capture_price_eur_per_mwh = (capture_meur_aligned / monthly_gwh_aligned) * 1000.0
+            capture_price_eur_per_mwh = capture_price_eur_per_mwh.replace([pd.NA], 0).fillna(0)
+
+    # ---------------- Plots: all in subplots ----------------
+    # Prepare x labels once
+    def _labels(idx):
         try:
-            x_labels2 = idx2.strftime("%Y-%m")
+            return idx.strftime("%Y-%m")
         except Exception:
-            x_labels2 = idx2.astype(str)
-        y2 = capture_meur.values
-
-        fig2, ax2 = plt.subplots(figsize=(12, 5))
-        ax2.bar(x_labels2, y2, color="#27AE60", edgecolor="#145A32")
-        ax2.set_title(f"Monthly Capture Value – {selected_col} × {price_col} (2025)", fontsize=14, pad=12)
-        ax2.set_xlabel("Month (YYYY-MM)", fontsize=12)
-        ax2.set_ylabel("Capture (M€)", fontsize=12)
-        ax2.grid(axis="y", linestyle="--", alpha=0.4)
-        plt.xticks(rotation=45, ha="right")
-        plt.tight_layout()
-        st.pyplot(fig2)
-
-        with st.expander("Show raw monthly capture (M€)"):
-            st.write(capture_meur.round(3))
-
-
-    # 10) Capture Price (€/MWh) = (Monthly Capture M€ / Monthly Production GWh) * 1000
-    # Align indices to be safe
-    common_index = monthly_gwh.index.intersection(capture_meur.index)
-    monthly_gwh_aligned = monthly_gwh.reindex(common_index)
-    capture_meur_aligned = capture_meur.reindex(common_index)
-
-    # Avoid division by zero
-    with pd.option_context("mode.use_inf_as_na", True):
-        capture_price_eur_per_mwh = (capture_meur_aligned / monthly_gwh_aligned) * 1000.0
-        capture_price_eur_per_mwh = capture_price_eur_per_mwh.replace([pd.NA], 0).fillna(0)
-
-    st.subheader(f"Monthly Capture Price for '{selected_col}' in 2025 (€/MWh)")
-
-    idx3 = capture_price_eur_per_mwh.index
-    try:
-        x_labels3 = idx3.strftime("%Y-%m")
-    except Exception:
-        x_labels3 = idx3.astype(str)
-    y3 = capture_price_eur_per_mwh.values
-
-    fig3, ax3 = plt.subplots(figsize=(12, 5))
-    ax3.bar(x_labels3, y3, color="#8E44AD", edgecolor="#4A235A")
-    ax3.set_title(f"Monthly Capture Price – {selected_col} (2025)", fontsize=14, pad=12)
-    ax3.set_xlabel("Month (YYYY-MM)", fontsize=12)
-    ax3.set_ylabel("Capture Price (€/MWh)", fontsize=12)
-    ax3.grid(axis="y", linestyle="--", alpha=0.4)
-    plt.xticks(rotation=45, ha="right")
-    plt.tight_layout()
-    st.pyplot(fig3)
-
-    with st.expander("Show raw monthly capture price (€/MWh)"):
-        st.write(capture_price_eur_per_mwh.round(2))
-
-
-
-
-
-
-
-
-
-
+            return idx.astype(str)
 
