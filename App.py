@@ -82,110 +82,196 @@ if not is_logged_in:
     st.info("🔒 Please log in with the password above to access the charts.")
     st.stop()
 
-# ---------------- Data Loading ----------------
-@st.cache_data(show_spinner=True)
-def load_data(files_glob: str = "Germany *.csv") -> pd.DataFrame:
-    """
-    Load one or multiple CSV files (e.g., 'Germany 2021.csv' ... 'Germany 2025.csv'),
-    auto-detect delimiter, parse dates, and return a single DataFrame.
 
-    Expected date column name: 'Date (GMT+1)' (case-insensitive tolerant).
-    """
-    paths = sorted(glob.glob(files_glob))
-    if not paths:
-        # Fallback: try a single file commonly used
-        if os.path.exists("Germany 2025.csv"):
-            paths = ["Germany 2025.csv"]
-        else:
-            raise FileNotFoundError(
-                "No matching files found. Please place files like 'Germany 2025.csv' "
-                "or 'Germany 2021.csv'…'Germany 2025.csv' in the app folder."
+    # ---------------- Data Loading ----------------
+    @st.cache_data(show_spinner=True)
+    def load_data(files_glob: str = "Germany *.csv"):
+        """
+        Load one or multiple CSV files (e.g., 'Germany 2021.csv' ... 'Germany 2025.csv'),
+        auto-detect delimiter, and return a single DataFrame with best-effort datetime parsing.
+        """
+        import numpy as np
+        paths = sorted(glob.glob(files_glob))
+        if not paths:
+            if os.path.exists("Germany 2025.csv"):
+                paths = ["Germany 2025.csv"]
+            else:
+                raise FileNotFoundError(
+                    "No matching files found. Please place files like 'Germany 2025.csv' "
+                    "or 'Germany 2021.csv'…'Germany 2025.csv' in the app folder."
+                )
+    
+        dfs = []
+        for p in paths:
+            df = pd.read_csv(p, encoding="utf-8-sig", sep=None, engine="python")
+            df["__SourceFile"] = os.path.basename(p)
+            dfs.append(df)
+    
+        df_all = pd.concat(dfs, ignore_index=True)
+    
+        # Identify likely date columns (by name patterns and dtype/object)
+        name_candidates = [
+            "Date (GMT+1)", "Date", "Datetime", "Timestamp", "Time (GMT+1)",
+            "date", "time", "datetime", "period", "delivery_start", "delivery time",
+        ]
+        # Add heuristic: columns whose name contains 'date' or 'time'
+        for c in list(df_all.columns):
+            if any(key in c.lower() for key in ["date", "time", "timestamp"]):
+                if c not in name_candidates:
+                    name_candidates.append(c)
+    
+        existing_candidates = [c for c in name_candidates if c in df_all.columns]
+    
+        # We won't parse here; we'll return both and let a parsing function run after user selection.
+        return df_all, existing_candidates
+    
+    
+    def try_parse_datetime(series: pd.Series) -> pd.Series:
+        """
+        Try multiple strategies to coerce a series to datetime.
+        Returns a datetime64[ns] series or raises a ValueError with diagnostics.
+        """
+        s = series.copy()
+    
+        # Already datetime?
+        if pd.api.types.is_datetime64_any_dtype(s):
+            return s
+    
+        # Common issues: commas in date (e.g., "01/02/2025, 12:00"), extra spaces
+        s = s.astype(str).str.strip().str.replace("\u200b", "", regex=False)
+    
+        # Strategy 1: pandas to_datetime with dayfirst=False and infer
+        s1 = pd.to_datetime(s, errors="coerce", infer_datetime_format=True, utc=False)
+        if s1.notna().mean() > 0.8:
+            return s1
+    
+        # Strategy 2: dayfirst=True (European-style)
+        s2 = pd.to_datetime(s, errors="coerce", dayfirst=True, infer_datetime_format=True, utc=False)
+        if s2.notna().mean() > 0.8:
+            return s2
+    
+        # Strategy 3: numeric timestamps (seconds or ms)
+        # Detect if numeric-like
+        s_num = pd.to_numeric(s, errors="coerce")
+        if s_num.notna().mean() > 0.8:
+            # Try ms first (values very large), then seconds
+            s3 = pd.to_datetime(s_num, errors="coerce", unit="ms", utc=False)
+            if s3.notna().mean() > 0.8:
+                return s3
+            s4 = pd.to_datetime(s_num, errors="coerce", unit="s", utc=False)
+            if s4.notna().mean() > 0.8:
+                return s4
+    
+        # Strategy 4: last resort—explicit formats commonly seen
+        common_formats = [
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d %H:%M:%S",
+            "%d/%m/%Y %H:%M",
+            "%d/%m/%Y %H:%M:%S",
+            "%m/%d/%Y %H:%M",
+            "%m/%d/%Y %H:%M:%S",
+            "%Y-%m-%d",
+            "%d/%m/%Y",
+            "%m/%d/%Y",
+            "%d-%m-%Y %H:%M",
+            "%Y.%m.%d %H:%M",
+        ]
+        for fmt in common_formats:
+            try:
+                s5 = pd.to_datetime(s, format=fmt, errors="coerce")
+                if s5.notna().mean() > 0.8:
+                    return s5
+            except Exception:
+                pass
+    
+        # If we reach here, parsing failed badly
+        na_rate_1 = s1.isna().mean() if 's1' in locals() else 1.0
+        na_rate_2 = s2.isna().mean() if 's2' in locals() else 1.0
+        raise ValueError(
+            "Failed to parse datetime for the selected column.\n"
+            f"Sample values: {series.dropna().astype(str).head(5).tolist()}\n"
+            f"to_datetime (dayfirst=False) NA ratio: {na_rate_1:.2f}\n"
+            f"to_datetime (dayfirst=True) NA ratio: {na_rate_2:.2f}\n"
+            "Tip: Ensure the column truly contains date/time values, not labels."
+        )
+    
+    try:
+        df, date_col_candidates = load_data()
+    except Exception as e:
+        st.error(f"❌ Data loading error: {e}")
+        st.stop()
+    
+    st.markdown("### Choose the date/time column")
+    if not date_col_candidates:
+        st.error(
+            "I couldn't auto-detect a date column. "
+            "Please verify your CSV has a date/time column (e.g., 'Date (GMT+1)')."
+        )
+        st.write("Columns detected:", list(df.columns))
+        st.stop()
+    
+    # Let the user override which column is the datetime
+    date_col = st.selectbox("Date/Time column", options=date_col_candidates)
+    
+    # Try parsing with robust logic
+    try:
+        df[date_col] = try_parse_datetime(df[date_col])
+    except Exception as e:
+        st.error(f"❌ Date parse error for '{date_col}': {e}")
+        with st.expander("Show column samples and dtypes"):
+            st.write("Detected columns and dtypes:")
+            st.write(df.dtypes)
+            st.write("First 10 non-null samples from the selected column:")
+            st.write(df[date_col].dropna().head(10))
+        st.stop()
+    
+    # Create Month column
+    df["Month"] = df[date_col].dt.to_period("M").dt.to_timestamp()
+    
+    # ---------------- Technology List ----------------
+    non_tech_cols = {date_col, "Month", "__SourceFile"}
+    # Consider numeric columns as candidate technologies; filter out obvious non-tech by name
+    exclude_keywords = ["price", "avg", "mean", "marginal", "min", "max", "product", "hour", "quarter", "period"]
+    candidate_techs = []
+    for c in df.columns:
+        if c in non_tech_cols:
+            continue
+        if df[c].dtype == "O":
+            continue
+        if any(k in c.lower() for k in exclude_keywords):
+            continue
+        candidate_techs.append(c)
+    
+    if not candidate_techs:
+        # Fallback to your predefined list
+        candidate_techs = [
+            "Cross border electricity trading","Hydro Run-of-River","Biomass","Fossil brown coal / lignite",
+            "Fossil hard coal","Fossil oil","Fossil coal-derived gas","Fossil gas","Geothermal",
+            "Hydro water reservoir","Hydro pumped storage","Others","Waste","Wind offshore",
+            "Wind onshore","Solar"
+        ]
+        missing = [c for c in candidate_techs if c not in df.columns]
+        if missing:
+            st.warning(
+                "Some expected technology columns were not found in the data: "
+                + ", ".join(missing)
             )
+    
+    st.subheader("Select the technology to visualize:")
+    selected_tech = st.selectbox("Technology", candidate_techs)
+    
+    if selected_tech not in df.columns:
+        st.error(f"Selected technology '{selected_tech}' not found in the data columns.")
+        st.stop()
+    
+    # ---------------- Monthly Aggregation & Chart ----------------
+    monthly_gwh = df.groupby('Month')[selected_tech].sum() / 4000.0
+    
+    st.subheader(f"Monthly Total Production for {selected_tech} (in GWh)")
+    st.bar_chart(monthly_gwh)
+    
+    with st.expander("Show raw monthly values (GWh)"):
+        st.write(monthly_gwh.round(2))
+    
+    st.caption("Total monthly production: values sum per month divided by 4000 (GWh).")
 
-    dfs: List[pd.DataFrame] = []
-    for p in paths:
-        # sep=None + engine='python' auto-detects comma/semicolon, etc.
-        df = pd.read_csv(p, encoding="utf-8-sig", sep=None, engine="python")
-        df["__SourceFile"] = os.path.basename(p)
-        dfs.append(df)
-
-    df_all = pd.concat(dfs, ignore_index=True)
-
-    # Normalize date column name
-    date_col_candidates = [
-        "Date (GMT+1)", "Date", "Datetime", "Timestamp", "Time (GMT+1)", "time", "date"
-    ]
-    date_col = None
-    for c in date_col_candidates:
-        if c in df_all.columns:
-            date_col = c
-            break
-    if date_col is None:
-        # Try case-insensitive match
-        lower_map = {c.lower(): c for c in df_all.columns}
-        for c in [x.lower() for x in date_col_candidates]:
-            if c in lower_map:
-                date_col = lower_map[c]
-                break
-    if date_col is None:
-        raise KeyError(
-            f"Could not find a date column among {date_col_candidates}. "
-            f"Columns found: {list(df_all.columns)}"
-        )
-
-    # Parse dates
-    df_all[date_col] = pd.to_datetime(df_all[date_col], errors="coerce")
-    df_all = df_all.dropna(subset=[date_col])
-    df_all = df_all.sort_values(by=date_col)
-
-    # Add a unified 'Month' column for grouping
-    df_all["Month"] = df_all[date_col].dt.to_period("M").dt.to_timestamp()
-
-    return df_all, date_col
-
-try:
-    df, date_col = load_data()
-except Exception as e:
-    st.error(f"❌ Data loading error: {e}")
-    st.stop()
-
-# ---------------- Technology List ----------------
-# Try to build from columns; exclude non-tech columns
-non_tech_cols = {date_col, "Month", "__SourceFile"}
-candidate_techs = [c for c in df.columns if c not in non_tech_cols and df[c].dtype != "O"]
-
-# If the CSV doesn’t contain these tech columns, fallback to your manual list
-if not candidate_techs:
-    candidate_techs = [
-        "Cross border electricity trading", "Hydro Run-of-River", "Biomass", "Fossil brown coal / lignite",
-        "Fossil hard coal", "Fossil oil", "Fossil coal-derived gas", "Fossil gas", "Geothermal",
-        "Hydro water reservoir", "Hydro pumped storage", "Others", "Waste", "Wind offshore",
-        "Wind onshore", "Solar"
-    ]
-    # Warn if they aren't found
-    missing = [c for c in candidate_techs if c not in df.columns]
-    if missing:
-        st.warning(
-            "Some expected technology columns were not found in the data: "
-            + ", ".join(missing)
-        )
-
-st.subheader("Select the technology to visualize:")
-selected_tech = st.selectbox("Technology", candidate_techs)
-
-if selected_tech not in df.columns:
-    st.error(f"Selected technology '{selected_tech}' not found in the data columns.")
-    st.stop()
-
-# ---------------- Monthly Aggregation & Chart ----------------
-# Assumption: values are in MWh per 15-min or hourly; your original note divides by 4000 to get GWh.
-# Keeping your original logic: sum per month / 4000 => GWh
-monthly_gwh = df.groupby('Month')[selected_tech].sum() / 4000.0
-
-st.subheader(f"Monthly Total Production for {selected_tech} (in GWh)")
-st.bar_chart(monthly_gwh)
-
-with st.expander("Show raw monthly values (GWh)"):
-    st.write(monthly_gwh.round(2))
-
-st.caption("Total monthly production: values sum per month divided by 4000 (GWh).")
