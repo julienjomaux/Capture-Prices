@@ -100,14 +100,19 @@ else:
     st.subheader("Select the technology to visualize:")
     selected_tech = st.selectbox("Technology", technologies)
     
-    # Add Month column for grouping
+    # Create Month column for grouping
     df['Month'] = df['Date (GMT+1)'].dt.to_period('M').dt.to_timestamp()
     
-    # Aggregate sums by month, convert to GWh
-    monthly_sum = df.groupby('Month')[selected_tech].sum() / 4000
+    # Aggregate total production per month (sum, divided by 4000 -> GWh)
+    monthly_gwh = df.groupby('Month')[selected_tech].sum() / 4000
     
-    # Plot
     st.subheader(f"Monthly Total Production for {selected_tech} (in GWh)")
-    st.bar_chart(monthly_sum)
+    st.bar_chart(monthly_gwh)
+    
+    with st.expander("Show raw monthly values (GWh)"):
+        st.write(monthly_gwh.round(2))
+    
+    st.caption("Total monthly production: values sum per month divided by 4000 (GWh).")
+
 
 
