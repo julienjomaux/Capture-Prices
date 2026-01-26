@@ -232,6 +232,8 @@ else:
     df = df[df[date_col].notna()].copy()
 
     # Create Month column (first day of the month timestamp)
+    
+    st.dataframe(df)
     df["Month"] = df[date_col].dt.to_period("M").dt.to_timestamp()
 
     # ---------------- Make numeric value columns numeric ----------------
@@ -307,3 +309,4 @@ else:
         "Notes: Average monthly production is the average power (MW) across all 15‑minute intervals in the month. "
         "Total monthly energy equals the sum of MW across 15‑minute intervals divided by 4000 (GWh)."
     )
+
