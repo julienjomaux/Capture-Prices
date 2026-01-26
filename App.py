@@ -81,7 +81,7 @@ is_logged_in = st.session_state.get('logged_in', False)
 if not is_logged_in:
     st.info("🔒 Please log in with the password above to access the charts.")
     st.stop()
-
+else:
 
     # ---------------- Data Loading ----------------
     @st.cache_data(show_spinner=True)
@@ -274,4 +274,5 @@ if not is_logged_in:
         st.write(monthly_gwh.round(2))
     
     st.caption("Total monthly production: values sum per month divided by 4000 (GWh).")
+
 
