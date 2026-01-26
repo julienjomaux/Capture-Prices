@@ -225,6 +225,41 @@ else:
             st.write(capture_meur.round(3))
 
 
+    # 10) Capture Price (€/MWh) = (Monthly Capture M€ / Monthly Production GWh) * 1000
+    # Align indices to be safe
+    common_index = monthly_gwh.index.intersection(capture_meur.index)
+    monthly_gwh_aligned = monthly_gwh.reindex(common_index)
+    capture_meur_aligned = capture_meur.reindex(common_index)
+
+    # Avoid division by zero
+    with pd.option_context("mode.use_inf_as_na", True):
+        capture_price_eur_per_mwh = (capture_meur_aligned / monthly_gwh_aligned) * 1000.0
+        capture_price_eur_per_mwh = capture_price_eur_per_mwh.replace([pd.NA], 0).fillna(0)
+
+    st.subheader(f"Monthly Capture Price for '{selected_col}' in 2025 (€/MWh)")
+
+    idx3 = capture_price_eur_per_mwh.index
+    try:
+        x_labels3 = idx3.strftime("%Y-%m")
+    except Exception:
+        x_labels3 = idx3.astype(str)
+    y3 = capture_price_eur_per_mwh.values
+
+    fig3, ax3 = plt.subplots(figsize=(12, 5))
+    ax3.bar(x_labels3, y3, color="#8E44AD", edgecolor="#4A235A")
+    ax3.set_title(f"Monthly Capture Price – {selected_col} (2025)", fontsize=14, pad=12)
+    ax3.set_xlabel("Month (YYYY-MM)", fontsize=12)
+    ax3.set_ylabel("Capture Price (€/MWh)", fontsize=12)
+    ax3.grid(axis="y", linestyle="--", alpha=0.4)
+    plt.xticks(rotation=45, ha="right")
+    plt.tight_layout()
+    st.pyplot(fig3)
+
+    with st.expander("Show raw monthly capture price (€/MWh)"):
+        st.write(capture_price_eur_per_mwh.round(2))
+
+
+
 
 
 
