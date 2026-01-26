@@ -33,7 +33,7 @@ st.markdown(
 This app presents the average Generation, captured value and capture prices of Generation in Germany for the last few years. 
 
 
-**Data source:** Regelleistung.net
+**Data source:** Downloaded data from https://www.energy-charts.info/ 
 
 **More insights:** GEM Energy Analytics  
 **Connect with me:** Julien Jomaux  
@@ -247,5 +247,6 @@ else:
         if not capture_price_eur_per_mwh.empty:
             out["Monthly Capture Price (€/MWh)"] = capture_price_eur_per_mwh.reindex(out.index).round(2)
         st.dataframe(out)
+
 
 
