@@ -10,12 +10,12 @@ import matplotlib.pyplot as plt
 # ---------------- Page config ----------------
 
 st.set_page_config(layout="wide", page_icon="GEM.webp")
-st.title("Average Monthly Generation and Capture Prices")
+st.title("Average Monthly Generation and Capture Prices - Germany")
 
 # ---------------- Description / CTA ----------------
 st.markdown(
     """
-This app presents the average Generation, captured value and capture prices of Generation in Germany for the last few years. 
+This app presents the average Generation, captured value and capture prices in Germany for the last few years. 
 
 **Data source:** Downloaded data from https://www.energy-charts.info/ 
 
@@ -200,4 +200,5 @@ with st.expander("Show raw aggregated data (click to expand)"):
         out["Monthly Capture (M€)"] = capture_meur.reindex(out.index).round(3)
     if not capture_price_eur_per_mwh.empty:
         out["Monthly Capture Price (€/MWh)"] = capture_price_eur_per_mwh.reindex(out.index).round(2)
+
     st.dataframe(out)
